@@ -1,0 +1,93 @@
+Passo a Passo: Compilacao e Execucao MPI (Baseado no HPP_06_MPI.pdf)
+
+Este guia e um passo a passo para compilar e executar seu programa 'gauss_paralelo.c' no ambiente de cluster da universidade, usando como referencia principal os slides da aula 'HPP_06_MPI.pdf'.
+
+---
+Passo 1: Configuracao do Ambiente Remoto (Requisito Obrigatorio)
+---
+
+Voce expressou duvida sobre o SSH. Os slides do professor sao claros: o MPI *precisa* de um shell remoto (como SSH) para funcionar em varias maquinas.
+
+1.  [cite_start]Requisito: O professor exige "Ter permissao de executar aplicacoes de forma remota, sem senha"[cite: 163].
+2.  [cite_start]Metodo: A forma padrao de fazer isso e "Configurar Remote Shell (RSH) ou Secure Shell (SSH)"[cite: 164].
+3.  Acao (Configurar SSH sem senha):
+    * No seu terminal principal, gere sua chave:
+      ssh-keygen -t rsa
+    * (Aperte Enter para aceitar os padroes, nao digite senha).
+    * Para cada maquina do laboratorio, copie sua chave (voce tera que digitar sua senha da faculdade esta unica vez para cada maquina):
+      ssh-copy-id seu_usuario@ip_da_maquina_2
+      ssh-copy-id seu_usuario@ip_da_maquina_3
+      ...etc
+
+4.  [cite_start]Confirmacao da Pasta Compartilhada: O slide menciona "Usar Network File System (NFS)"[cite: 164]. Sua "pasta compartilhada" e isso. [cite_start]Significa que "Todos os computadores devem ter acesso ao binario" [cite: 164] automaticamente, e voce so precisa compilar uma vez.
+
+---
+Passo 2: Preparacao dos Arquivos de Dados
+---
+
+O programa MPI precisa ler os arquivos 'matrix.in', 'vector.in' e o tamanho 'N'.
+
+1.  Pegar a matriz pronta para teste e o vector.
+
+2. gerar o arq de execução:
+    echo "7500" > N.txt
+
+---
+Passo 3: Criacao do Arquivo de Hosts (hosts.txt)
+---
+
+O 'mpirun' precisa saber quais maquinas usar e quantos processos rodar em cada uma.
+
+1.  Crie o arquivo: `nano hosts.txt`
+2.  [cite_start]Adicione as Maquinas e Slots: Liste os IPs (ou hostnames) [cite: 99, 101] e adicione 'slots=4' para cada um. [cite_start]Isso respeita a regra do professor (max 4 nucleos) e evita o erro "There are not enough slots available"[cite: 116].
+
+    Exemplo de 'hosts.txt':
+    # Substitua pelos IPs reais do laboratorio
+    192.168.1.101 slots=4
+    192.168.1.102 slots=4
+    192.168.1.103 slots=4
+    192.168.1.104 slots=4
+    192.168.1.105 slots=4
+    192.168.1.106 slots=4
+    192.168.1.107 slots=4
+    192.168.1.108 slots=4
+
+---
+Passo 4: Compilacao do Programa MPI
+---
+
+[cite_start]Use o 'mpicc', que e o compilador que o professor ensinou[cite: 75].
+
+1.  [cite_start]Sintaxe do Professor: `mpicc {fonte.c} (-o binário) [parâmetros]`[cite: 85].
+2.  [cite_start]Nosso Comando: O programa 'gauss_paralelo.c' usa 'math.h', entao precisamos do parametro '-lm' (assim como no exemplo 'raiz.c' do professor [cite: 87]).
+
+    mpicc gauss_paralelo.c -o gauss_paralelo -lm
+
+---
+Passo 5: Execucao dos Testes
+---
+
+[cite_start]Execute o 'mpirun' [cite: 137] *apenas da sua maquina principal*. Ele usara o SSH (Passo 1) para lancar os processos nas outras maquinas listadas no 'hosts.txt' (Passo 3).
+
+1.  Sintaxe do Professor (para varios computadores):
+    [cite_start]`mpirun -np x --hostfile <arquivo_hosts> binário` [cite: 155, 157]
+    [cite_start](Onde 'x' e a quantidade de processos [cite: 158]).
+
+2.  Sequencia de Comandos de Teste: (Vamos redirecionar o 'N.txt' que criamos no Passo 2 como entrada).
+
+    # Teste com 2 processos
+    mpirun -np 2 --hostfile hosts.txt ./gauss_paralelo < N.txt
+
+    # Teste com 4 processos
+    mpirun -np 4 --hostfile hosts.txt ./gauss_paralelo < N.txt
+
+    # Teste com 8 processos (usara 2 maquinas)
+    mpirun -np 8 --hostfile hosts.txt ./gauss_paralelo < N.txt
+
+    # Teste com 16 processos (usara 4 maquinas)
+    mpirun -np 16 --hostfile hosts.txt ./gauss_paralelo < N.txt
+
+    # Teste com 32 processos (usara 8 maquinas)
+    mpirun -np 32 --hostfile hosts.txt ./gauss_paralelo < N.txt
+
+A partir daqui, anote os tempos de execucao impressos pelo processo de rank 0 para usar no seu relatorio.
