@@ -91,3 +91,14 @@ Passo 5: Execucao dos Testes
     mpirun -np 32 --hostfile hosts.txt ./gauss_paralelo < N.txt
 
 A partir daqui, anote os tempos de execucao impressos pelo processo de rank 0 para usar no seu relatorio.
+
+
+
+==========================
+pasta pessoal: /mpi/194828
+- add hosts
+- binario
+- arquivos de teste.
+
+mpicc -std=c99 gauss_mpi.c -o gauss_mpi -lm
+echo 7500 | mpirun -np 4 ./gauss_mpi
