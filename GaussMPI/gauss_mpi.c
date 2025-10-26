@@ -28,102 +28,91 @@ void solveLinearSystem(
 
 int main(int argc, char **argv) {
     int n;
-    int meurank, P; // Variáveis para o ID do processo e o número total de processos
+    int meurank, P; 
     int nerros = 0;
     
-    double *A_full = NULL, *b_full = NULL, *x_vec = NULL; // Matrizes completas (só o root usa)
-    double *A_local = NULL, *b_local = NULL;              // Matrizes locais (todos usam)
-    int local_rows; // Quantidade de linhas que este processo vai gerenciar
+    double *A_full = NULL, *b_full = NULL, *x_vec = NULL; 
+    double *A_local = NULL, *b_local = NULL;              
+    int local_rows; 
 
-    double tempo_inicial, tempo_final; // Variáveis para medição de tempo
+    double tempo_inicial, tempo_final; 
 
-    /* 
-    * [cite_start]2. MPI_Init: Inicializa o ambiente MPI. [cite: 801, 811]
-    * [cite_start]É a primeira função MPI que deve ser chamada. [cite: 811]
-    * Ela "acorda" o sistema de comunicação e permite que os
-    * processos se reconheçam.
-    */
+    /* 1. Inicializa MPI */
     MPI_Init(&argc, &argv);
-
-    /*
-     * [cite_start]3. MPI_Comm_size: Obtém o número total de processos. [cite: 805, 830]
-     * Pergunta ao comunicador 'MPI_COMM_WORLD' (que inclui todos os 
-     * [cite_start]processos [cite: 737]) quantos processos (P) estão nesta execução.
-     */
     MPI_Comm_size(MPI_COMM_WORLD, &P);
-
-    /*
-     * [cite_start]4. MPI_Comm_rank: Obtém o ID (rank) deste processo. [cite: 804, 826]
-     * Pergunta ao 'MPI_COMM_WORLD' qual é o ID (meurank) deste 
-     * [cite_start]processo específico, que vai de 0 até (P-1). [cite: 727]
-     */
     MPI_Comm_rank(MPI_COMM_WORLD, &meurank);
 
-
-    // --- Carregamento e Distribuição de Dados ---
-    
-    // APENAS o processo 'root' (rank 0) lê o 'n' do teclado
-    if (meurank == 0) {
-        printf("Digite a ordem da matriz (n): ");
-        scanf("%d", &n);
+    /* * 2. CONTROLE DE PROCESSOS (Exigência do Professor)
+     * Verifica se P é 2, 4, 8, 16 ou 32.
+     */
+    if (P != 2 && P != 4 && P != 8 && P != 16 && P != 32) {
+        /* Apenas o 'root' (0) imprime a mensagem de erro  */
+        if (meurank == 0) {
+            fprintf(stderr, "Erro: Este programa deve ser executado com 2, 4, 8, 16 ou 32 processos.\n");
+            fprintf(stderr, "Voce executou com %d processos.\n", P);
+        }
+        MPI_Finalize(); // Todos os processos terminam
+        exit(1);        // Todos saem com erro
     }
 
-    /*
-     * [cite_start]5. MPI_Bcast (Broadcast): Envia um dado de UM para TODOS. [cite: 36, 101]
-     * O processo 'root' (rank 0) envia o valor 'n' que ele leu 
-     * [cite_start]para todos os outros processos no 'MPI_COMM_WORLD'. [cite: 114, 118]
-     * Isso garante que todos os processos saibam o tamanho do problema.
-     * [cite_start]Argumentos: (ponteiro_dado, qtd_elementos, tipo_dado, rank_raiz, comunicador) [cite: 115-119]
+    /* * 3. ENTRADA VIA LINHA DE COMANDO (Exigência do Professor)
+     * Verifica se o usuário passou o argumento <N> (tamanho da matriz)
      */
-    MPI_Bcast(&n, 1, MPI_INT, 0, MPI_COMM_WORLD);
+    if (argc < 2) {
+        if (meurank == 0) {
+            fprintf(stderr, "Erro: Uso: mpirun -np %d %s <N>\n", P, argv[0]);
+            fprintf(stderr, "Onde <N> e a ordem da matriz (ex: 7500).\n");
+        }
+        MPI_Finalize();
+        exit(1);
+    }
 
-    // Alocação de memória
-    // O 'root' (0) aloca a matriz completa para carregar os dados
+    /* * 4. Obtém o 'n' dos argumentos
+     * Todos os processos recebem 'argc' e 'argv', então todos podem ler.
+     * Nao precisamos mais do MPI_Bcast para 'n'.
+     */
+    n = atoi(argv[1]); // atoi() converte a string do argumento para inteiro
+    if (n <= 0) {
+         if (meurank == 0) {
+            fprintf(stderr, "Erro: <N> deve ser um inteiro positivo (ex: 7500).\n");
+        }
+        MPI_Finalize();
+        exit(1);
+    }
+
+    if (meurank == 0) {
+        printf("Iniciando execucao com N=%d e P=%d processos.\n", n, P);
+    }
+
+    // --- Alocação de Memória (lógica idêntica à anterior) ---
     if (meurank == 0) {
         A_full = (double *) malloc(n * n * sizeof(double));
         b_full = (double *) malloc(n * sizeof(double));
         x_vec  = (double *) malloc(n * sizeof(double));
-        //generateLinearSystem(n, A_full, b_full); // Se for gerar
-        //saveFiles(n, A_full, b_full);            // Se for salvar
-        loadLinearSystem(n, A_full, b_full);       // Carrega do disco
+        loadLinearSystem(n, A_full, b_full); // Carrega do disco
     }
 
-    // Todos os processos calculam quantas linhas locais vão armazenar (distribuição cíclica)
-    // Ex: n=10, P=4. 
-    // P0 (rank 0) pega 3 linhas (0, 4, 8)
-    // P1 (rank 1) pega 3 linhas (1, 5, 9)
-    // P2 (rank 2) pega 2 linhas (2, 6)
-    // P3 (rank 3) pega 2 linhas (3, 7)
     local_rows = n / P;
     if (meurank < (n % P)) {
         local_rows++;
     }
 
-    // Todos os processos alocam suas matrizes LOCAIS
     A_local = (double *) malloc(local_rows * n * sizeof(double));
     b_local = (double *) malloc(local_rows * sizeof(double));
 
-
-    /*
-     * [cite_start]6. MPI_Barrier (Barreira): Sincroniza todos os processos. [cite: 35, 69]
-     * Ninguém passa deste ponto até que TODOS os processos tenham 
-     * [cite_start]chegado aqui. [cite: 70]
-     * Usado para garantir que a medição de tempo comece 
-     * (o mais próximo) simultaneamente após as alocações.
-     */
+    /* 6. Sincroniza antes de começar a medição */
     MPI_Barrier(MPI_COMM_WORLD);
 
     // --- Início da Medição de Tempo ---
     if (meurank == 0) {
-        tempo_inicial = MPI_Wtime(); // Pega o tempo de relógio (wall clock)
+        tempo_inicial = MPI_Wtime(); 
     }
 
     // Chama a função de solução paralela
     solveLinearSystem(n, A_local, b_local, x_vec, meurank, P);
 
     // --- Fim da Medição de Tempo ---
-    MPI_Barrier(MPI_COMM_WORLD); // Garante que o 'root' só pare o tempo
-                                 // depois que o processo mais lento terminar.
+    MPI_Barrier(MPI_COMM_WORLD); 
     if (meurank == 0) {
         tempo_final = MPI_Wtime();
         printf("Tempo de execucao: %f segundos\n", tempo_final - tempo_inicial);
@@ -131,10 +120,6 @@ int main(int argc, char **argv) {
 
     // --- Verificação e Finalização (só o root) ---
     if (meurank == 0) {
-        // O A_full foi modificado pela função 'solve'
-        // Mas a verificação de erros precisa do A_full *original*.
-        // Vamos recarregar o original para testar.
-        
         loadLinearSystem(n, A_full, b_full); // Recarrega o A original
         
         nerros += testLinearSystem(A_full, b_full, x_vec, n);
@@ -142,26 +127,19 @@ int main(int argc, char **argv) {
         
         saveResult(A_full, b_full, x_vec, n);
 
-        // Libera memória do root 
         free(A_full);
         free(b_full);
         free(x_vec);
     }
 
-    // Libera memória local de todos os processos
     free(A_local);
     free(b_local);
 
-    /*
-     * [cite_start]7. MPI_Finalize: Termina o ambiente MPI. [cite: 803, 819]
-     * [cite_start]É a última função MPI a ser chamada. [cite: 820]
-     * Desativa o sistema de comunicação.
-     */
+    /* 7. Finaliza MPI */
     MPI_Finalize();
     
     return EXIT_SUCCESS;
 }
-
 
 /*
  * Esta é a função que implementa a Eliminação Gaussiana Paralela.
