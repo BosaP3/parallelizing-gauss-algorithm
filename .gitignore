@@ -1,1 +1,2 @@
-matrix.in.gz
+*.gz
+*.in
