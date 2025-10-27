@@ -1,0 +1,8 @@
+LCI-16-226 slots=4
+LCI-16-227 slots=4
+LCI-16-221 slots=4
+LCI-16-229 slots=4
+LCI-16-234 slots=4
+LCI-16-235 slots=4
+LCI-16-236 slots=4
+LCI-16-237 slots=4
