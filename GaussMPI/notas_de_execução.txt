@@ -70,7 +70,7 @@ Iniciando execucao com N=7500 e P=32 processos.
 Tempo de execucao: 57.941892 segundos
 Errors=0
 
-Rodei mais vezes com esses resultados -> 63s, 62s, ...
+Rodei mais vezes com esses resultados -> 63s, 62s, 63s, 77s, 77s, 82s, 89s, 73s...
 
 194828@lci-16-234-lnx:~/mpi/194828$ mpirun -np 16 --hostfile hosts.txt ./gauss_mpi_v1 7500
 Iniciando execucao com N=7500 e P=16 processos.
