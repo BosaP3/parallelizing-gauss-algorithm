@@ -12,22 +12,9 @@ void saveResult(double *A, double *b, double *x, int n);
 int  testLinearSystem(double *A, double *b, double *x, int n);
 void generateLinearSystem(int n, double *A, double *b);
 void loadLinearSystem(int n, double *A, double *b);
-
-/* * Esta é a NOVA função paralela. 
- * Note que ela recebe os IDs (meurank, P) e os ponteiros para 
- * as matrizes/vetores LOCAIS de cada processo.
- */
-void solveLinearSystem(
-    int n, 
-    double *A_local, // Matriz local (só as linhas deste processo)
-    double *b_local, // Vetor b local (só os B's deste processo)
-    double *x,       // Vetor x (calculado e mantido pelo root)
-    int meurank,     // ID deste processo
-    int P            // Número total de processos
-);
+void solveLinearSystem(double *A_local, double *b_local, double *x, int n, int meurank, int P);
 
 int main(int argc, char **argv) {
-    int n;
     int meurank, P; 
     int nerros = 0;
     
@@ -37,59 +24,37 @@ int main(int argc, char **argv) {
 
     double tempo_inicial, tempo_final; 
 
-    /* 1. Inicializa MPI */
     MPI_Init(&argc, &argv);
     MPI_Comm_size(MPI_COMM_WORLD, &P);
     MPI_Comm_rank(MPI_COMM_WORLD, &meurank);
 
-    /* * 2. CONTROLE DE PROCESSOS (Exigência do Professor)
-     * Verifica se P é 2, 4, 8, 16 ou 32.
-     */
+    int n;
+
+    // Controle de execução
     if (P != 2 && P != 4 && P != 8 && P != 16 && P != 32) {
-        /* Apenas o 'root' (0) imprime a mensagem de erro  */
         if (meurank == 0) {
-            fprintf(stderr, "Erro: Este programa deve ser executado com 2, 4, 8, 16 ou 32 processos.\n");
-            fprintf(stderr, "Voce executou com %d processos.\n", P);
+            fprintf(stderr, "Erro: Programa deve ser executado com 2, 4, 8, 16 ou 32 processos.\n");
         }
-        MPI_Finalize(); // Todos os processos terminam
-        exit(1);        // Todos saem com erro
+        MPI_Finalize(); 
+        exit(1);        
     }
 
-    /* * 3. ENTRADA VIA LINHA DE COMANDO (Exigência do Professor)
-     * Verifica se o usuário passou o argumento <N> (tamanho da matriz)
-     */
-    if (argc < 2) {
-        if (meurank == 0) {
-            fprintf(stderr, "Erro: Uso: mpirun -np %d %s <N>\n", P, argv[0]);
-            fprintf(stderr, "Onde <N> e a ordem da matriz (ex: 7500).\n");
-        }
-        MPI_Finalize();
-        exit(1);
+    if (meurank == 0) {
+        scanf("%d", &n);
     }
 
-    /* * 4. Obtém o 'n' dos argumentos
-     * Todos os processos recebem 'argc' e 'argv', então todos podem ler.
-     * Nao precisamos mais do MPI_Bcast para 'n'.
-     */
-    n = atoi(argv[1]); // atoi() converte a string do argumento para inteiro
-    if (n <= 0) {
-         if (meurank == 0) {
-            fprintf(stderr, "Erro: <N> deve ser um inteiro positivo (ex: 7500).\n");
-        }
-        MPI_Finalize();
-        exit(1);
-    }
+    MPI_Bcast(&n, 1, MPI_INT, 0, MPI_COMM_WORLD);
 
+    // Controle de execução
     if (meurank == 0) {
         printf("Iniciando execucao com N=%d e P=%d processos.\n", n, P);
     }
 
-    // --- Alocação de Memória (lógica idêntica à anterior) ---
     if (meurank == 0) {
         A_full = (double *) malloc(n * n * sizeof(double));
         b_full = (double *) malloc(n * sizeof(double));
         x_vec  = (double *) malloc(n * sizeof(double));
-        loadLinearSystem(n, A_full, b_full); // Carrega do disco
+        loadLinearSystem(n, A_full, b_full);
     }
 
     local_rows = n / P;
@@ -100,27 +65,23 @@ int main(int argc, char **argv) {
     A_local = (double *) malloc(local_rows * n * sizeof(double));
     b_local = (double *) malloc(local_rows * sizeof(double));
 
-    /* 6. Sincroniza antes de começar a medição */
+    // Sincroniza e pega o tempo inicial
     MPI_Barrier(MPI_COMM_WORLD);
-
-    // --- Início da Medição de Tempo ---
     if (meurank == 0) {
         tempo_inicial = MPI_Wtime(); 
     }
 
-    // Chama a função de solução paralela
-    solveLinearSystem(n, A_local, b_local, x_vec, meurank, P);
+    solveLinearSystem(A_local, b_local, x_vec, n, meurank, P);
 
-    // --- Fim da Medição de Tempo ---
+    // Tempo final
     MPI_Barrier(MPI_COMM_WORLD); 
     if (meurank == 0) {
         tempo_final = MPI_Wtime();
         printf("Tempo de execucao: %f segundos\n", tempo_final - tempo_inicial);
     }
 
-    // --- Verificação e Finalização (só o root) ---
     if (meurank == 0) {
-        loadLinearSystem(n, A_full, b_full); // Recarrega o A original
+        loadLinearSystem(n, A_full, b_full);
         
         nerros += testLinearSystem(A_full, b_full, x_vec, n);
         printf("Errors=%d\n", nerros);
@@ -135,45 +96,27 @@ int main(int argc, char **argv) {
     free(A_local);
     free(b_local);
 
-    /* 7. Finaliza MPI */
     MPI_Finalize();
     
     return EXIT_SUCCESS;
 }
 
-/*
- * Esta é a função que implementa a Eliminação Gaussiana Paralela
- * usando uma distribuição em BLOCO, seguindo a lógica
- * das funções MPI_Scatter e MPI_Gather apresentadas no PDF.
- */
-void solveLinearSystem(int n, double *A_local, double *b_local, 
-                       double *x, int meurank, int P) 
+void solveLinearSystem(double *A_local, double *b_local, 
+                       double *x, int n, int meurank, int P) 
 {
     int i, j, k; 
     
-    // Buffers temporários (só o root usa)
     double *A_full_temp = NULL; 
     double *b_full_temp = NULL; 
     MPI_Status status; 
 
-    // --- 0. Calcular a divisão em Bloco ---
-    // Todos os processos precisam saber qual bloco possuem
     int rows_per_p = n / P;
     int remainder = n % P;
     
-    // Quantas linhas EU (meurank) possuo
     int my_num_rows = rows_per_p + (meurank < remainder ? 1 : 0);
     
-    // Qual é a primeira linha GLOBAL que eu possuo
-    // ex: P=4, n=10 (rows_per_p=2, remainder=2)
-    // P0: 3 linhas (0,1,2). first_row = (2*0) + (0) = 0
-    // P1: 3 linhas (3,4,5). first_row = (2*1) + (1) = 3
-    // P2: 2 linhas (6,7).   first_row = (2*2) + (2) = 6
-    // P3: 2 linhas (8,9).   first_row = (2*3) + (2) = 8
     int my_first_row = (rows_per_p * meurank) + (meurank < remainder ? meurank : remainder);
 
-
-    // --- 1. FASE DE DISTRIBUIÇÃO (Simulando MPI_Scatter [cite: 838-848]) ---
     if (meurank == 0) {
         A_full_temp = (double *) malloc(n * n * sizeof(double));
         b_full_temp = (double *) malloc(n * sizeof(double));
@@ -181,11 +124,11 @@ void solveLinearSystem(int n, double *A_local, double *b_local,
 
         int current_row = 0;
         for (int dest = 0; dest < P; dest++) {
-            // Calcula o tamanho do bloco para o processo 'dest'
+            
             int rows_to_send = rows_per_p + (dest < remainder ? 1 : 0);
             
             if (dest == 0) {
-                // Se o destino sou eu (root), apenas copio localmente
+                // copia localmente
                 memcpy(A_local, &A_full_temp[current_row * n], rows_to_send * n * sizeof(double));
                 memcpy(b_local, &b_full_temp[current_row], rows_to_send * sizeof(double));
             } else {
@@ -193,30 +136,22 @@ void solveLinearSystem(int n, double *A_local, double *b_local,
                 MPI_Send(&A_full_temp[current_row * n], rows_to_send * n, MPI_DOUBLE, dest, 0, MPI_COMM_WORLD);
                 MPI_Send(&b_full_temp[current_row], rows_to_send, MPI_DOUBLE, dest, 1, MPI_COMM_WORLD);
             }
-            current_row += rows_to_send; // Avança o ponteiro de linha
+            current_row += rows_to_send;
         }
         free(A_full_temp); 
         free(b_full_temp);
     } 
-    // Os outros processos (escravos) recebem seu bloco ÚNICO
     else {
         // Recebe o bloco de 'my_num_rows' linhas
-        // Note que o tag é 0 e 1 (diferente da versão cíclica)
         MPI_Recv(A_local, my_num_rows * n, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD, &status);
         MPI_Recv(b_local, my_num_rows, MPI_DOUBLE, 0, 1, MPI_COMM_WORLD, &status);
     }
-
-    // --- 2. FASE DE ELIMINAÇÃO GAUSSIANA (Computação Paralela) ---
     
-    // Aloca um buffer em TODOS os processos para receber a linha-pivô
     double *pivot_row = (double *) malloc(n * sizeof(double));
     double pivot_b;
     
-    // O loop 'i' (pivô) é sequencial e executado por todos
     for (i = 0; i < (n - 1); i++) {
-        
-        // 1. Descobrir quem é o "dono" da linha pivô 'i'
-        //    (Lógica O(1) para encontrar o dono no bloco)
+
         int owner;
         int pivot_threshold = remainder * (rows_per_p + 1);
         
@@ -226,31 +161,19 @@ void solveLinearSystem(int n, double *A_local, double *b_local,
             owner = remainder + (i - pivot_threshold) / rows_per_p;
         }
 
-        // 2. O processo "dono" copia sua linha pivô local para o buffer
         if (meurank == owner) {
-            // Calcula o índice local da linha pivô 'i'
             int local_idx = i - my_first_row; 
             memcpy(pivot_row, &A_local[local_idx * n], n * sizeof(double));
             pivot_b = b_local[local_idx];
         }
 
-        /*
-         * 3. MPI_Bcast: Função do PDF [cite: 764-771]
-         * O 'dono' envia (broadcast) a linha pivô para TODOS.
-         */
         MPI_Bcast(pivot_row, n, MPI_DOUBLE, owner, MPI_COMM_WORLD);
         MPI_Bcast(&pivot_b, 1, MPI_DOUBLE, owner, MPI_COMM_WORLD);
 
-        // 4. Computação Paralela (Cada processo atualiza SUAS linhas)
-        //    (Esta é a parte que sofre com desbalanceamento de carga)
-        
-        // j_local vai de 0 até (my_num_rows - 1)
         for (int j_local = 0; j_local < my_num_rows; j_local++) {
             
-            // Descobre o índice global da linha local 'j_local'
             int j_global = my_first_row + j_local;
 
-            // Só atualiza linhas que estão ABAIXO do pivô 'i'
             if (j_global > i) {
                 double ratio = A_local[j_local * n + i] / pivot_row[i];
                 for (k = i; k < n; k++) { 
@@ -261,9 +184,7 @@ void solveLinearSystem(int n, double *A_local, double *b_local,
         }
     }
     
-    free(pivot_row); // Libera o buffer do pivô
-
-    // --- 3. FASE DE GATHER (Simulando MPI_Gather [cite: 964-973]) ---
+    free(pivot_row);
     
     if (meurank == 0) {
         A_full_temp = (double *) malloc(n * n * sizeof(double));
@@ -271,30 +192,25 @@ void solveLinearSystem(int n, double *A_local, double *b_local,
 
         int current_row = 0;
         for (int source = 0; source < P; source++) {
-            // Calcula o tamanho do bloco que 'source' vai enviar
+           
             int rows_to_recv = rows_per_p + (source < remainder ? 1 : 0);
             
             if (source == 0) {
-                // Copia do meu próprio A_local
                 memcpy(&A_full_temp[current_row * n], A_local, rows_to_recv * n * sizeof(double));
                 memcpy(&b_full_temp[current_row], b_local, rows_to_recv * sizeof(double));
             } else {
-                // Recebe o bloco contíguo do processo 'source'
                 MPI_Recv(&A_full_temp[current_row * n], rows_to_recv * n, MPI_DOUBLE, source, 0, MPI_COMM_WORLD, &status);
                 MPI_Recv(&b_full_temp[current_row], rows_to_recv, MPI_DOUBLE, source, 1, MPI_COMM_WORLD, &status);
             }
-            current_row += rows_to_recv; // Avança o ponteiro de escrita
+            current_row += rows_to_recv;
         }
     } 
-    // Os 'escravos' enviam seu bloco ÚNICO de volta para o 'root'
     else {
         MPI_Send(A_local, my_num_rows * n, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD);
         MPI_Send(b_local, my_num_rows, MPI_DOUBLE, 0, 1, MPI_COMM_WORLD);
     }
 
-    // --- 4. FASE DE RETRO-SUBSTITUIÇÃO (Sequencial no Root) ---
     if (meurank == 0) {
-        // (Exatamente o mesmo código sequencial de antes)
         x[n - 1] = b_full_temp[n - 1] / A_full_temp[(n - 1) * n + n - 1];
         for (i = (n - 2); i >= 0; i--) {
             double temp = b_full_temp[i];
